@@ -10,6 +10,41 @@ See the root [`DESIGN.md`](../DESIGN.md#task-2--multi-sensor-data-aggregator)
 for the full architecture writeup (threading model, why a single mutex is
 fine here, the replay-timing assumption, and the stall-injection bonus).
 
+## Architecture
+
+Three fully independent producer threads (one per sensor CSV), a single
+shared, mutex-protected state holder, and a printer/consumer thread that
+polls it on a fixed cadence. This is a classic producer-consumer
+arrangement with *multiple* producers and one logical consumer that
+always reads the latest value per source — no merging or interpolation
+across sensors, since each has its own sampling rate and timeline.
+
+```mermaid
+flowchart TB
+    subgraph Producers["Producer threads (independent timelines)"]
+        GPS["SensorReplayProducer\n(gps_reference.csv, 200ms period)"]
+        IMU["SensorReplayProducer\n(imu_reference.csv, 10ms period)"]
+        ENC["SensorReplayProducer\n(wheel_encoder_reference.csv, 20ms period)"]
+    end
+
+    GPS -->|updateGps + timestamp| VSM
+    IMU -->|updateImu + timestamp| VSM
+    ENC -->|updateEncoder + timestamp| VSM
+
+    VSM["VehicleStateManager\n(single std::mutex)\nlatest GPS / IMU / Encoder sample\n+ last-update timestamps"]
+
+    VSM -->|snapshot| Printer["Printer/consumer thread\n(polls every 200ms, no busy-wait)"]
+    Printer --> Console["Console: state + staleness flags"]
+    Printer -->|optional| CSV["--export path.csv"]
+```
+
+**Shutdown path:** each producer's `run()` loop checks an atomic
+`stop_requested_` flag before, and is interruptible during, every sleep
+(via `condition_variable::wait_until`). `main()` calls `requestStop()` +
+`join()` on all three uniformly, whether they finished naturally at the
+end of their CSV or were stopped early — no thread is ever left running
+or blocked past shutdown.
+
 ## Layout
 
 ```

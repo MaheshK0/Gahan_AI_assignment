@@ -15,6 +15,44 @@ before the interview discussion:
   against every frame in the log, and how the three injected faults were
   found.
 
+## Architecture
+
+A single-threaded pipeline: `frames.log` is read and sorted once, then
+replayed in timestamp order, decoding each frame against the signal
+database and feeding it through diagnostics before updating the live
+vehicle state. Nothing in the spec requires concurrent producers here
+(unlike Task 2) since `frames.log` is already one interleaved trace.
+
+```mermaid
+flowchart TB
+    JSON["dbc.json"] --> JV["JsonValue\n(hand-written recursive-descent parser)"]
+    JV --> DB["DbcDatabase\n(MessageDef + SignalDef per CAN ID)"]
+
+    LOG["frames.log"] --> FLR["FrameLogReader"] --> Frames["RawFrame list\n(sorted by timestamp)"]
+
+    Frames --> Main["main.cpp replay loop"]
+    DB --> Main
+
+    Main -->|known ID| Codec["SignalCodec\n(pure bit-extraction,\nIntel + Motorola, signed/unsigned)"]
+    Main -->|unknown ID| Diag
+
+    Codec --> Diag["DiagnosticsEngine\ncounter-gap / checksum / timeout"]
+    Codec --> VSU["VehicleStateUpdater"]
+
+    VSU --> State["CanVehicleState\nRPM / Speed / Gear / Brake / Steering"]
+    Diag --> Anomalies["Anomaly stream\n(printed as !! lines)"]
+    Diag --> Stats["Per-message MessageStats\n(end-of-run summary)"]
+
+    State --> Console["Continuous status line\n(OK / WARNING + reason)"]
+    Anomalies --> Console
+```
+
+Between frame arrivals, the replay loop wakes on a short poll interval
+(not a busy loop) purely to re-check `DiagnosticsEngine::checkTimeouts()`
+— this is what lets a gap like the injected 310ms `SteeringData` stall get
+flagged mid-wait, well before the next real frame shows up, rather than
+only being noticed retroactively.
+
 ## Layout
 
 ```

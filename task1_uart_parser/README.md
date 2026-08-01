@@ -16,6 +16,55 @@ any parsing code was written. This is documented in
 [`include/uart_parser.hpp`](include/uart_parser.hpp) as well, so it isn't
 mistaken for a bug.
 
+## Architecture
+
+`UartParser` is a single class implementing an explicit state machine.
+`feed(byte)` advances it by exactly one byte and returns; a decoded
+packet is delivered synchronously via callback before `feed()` returns.
+No parsing step ever needs to see more than the current byte plus the
+handful of fixed-size fields already buffered in the instance:
+
+```mermaid
+stateDiagram-v2
+    [*] --> WaitSof1
+    WaitSof1 --> WaitSof2: byte == 0xAA
+    WaitSof1 --> WaitSof1: else (discarded_bytes++)
+
+    WaitSof2 --> Length: byte == 0x55
+    WaitSof2 --> WaitSof2: byte == 0xAA (false start, retry)
+    WaitSof2 --> WaitSof1: else (discarded_bytes++)
+
+    Length --> Type: store Length, init running CRC
+
+    Type --> CrcLo: Length == 0
+    Type --> Payload: Length > 0
+
+    Payload --> Payload: byte count < Length
+    Payload --> CrcLo: byte count == Length
+
+    CrcLo --> CrcHi: store low CRC byte
+
+    CrcHi --> WaitSof1: CRC matches (valid_packets++, deliver packet)
+    CrcHi --> WaitSof1: CRC mismatch (crc_failures++, sync_losses++)
+```
+
+Driving components:
+
+```mermaid
+flowchart LR
+    A["uart_stream.bin"] -->|one byte at a time| B["UartParser::feed(byte)"]
+    B -->|on valid packet| C["onPacket callback\n(prints decoded packet)"]
+    B --> D["ParserStats\n(valid / crc_failures / sync_losses /\ndiscarded_bytes / partial_packets)"]
+    E["main.cpp driver"] --> B
+    E --> F["prints stats at end of stream"]
+    D --> F
+```
+
+All state (buffer, running CRC, current field, stats) lives inside the
+`UartParser` instance — no globals, no heap allocation on the hot path,
+so multiple independent parser instances can run concurrently with zero
+shared state between them.
+
 ## Layout
 
 ```
