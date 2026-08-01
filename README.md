@@ -4,8 +4,7 @@ C++17 solutions for all three tasks: a streaming UART protocol parser, a
 multi-threaded sensor aggregator, and a CAN frame decoder with vehicle
 state + diagnostics.
 
-See [`DESIGN.md`](DESIGN.md) for architecture notes, threading models, and
-the assumptions made for each task (including two data-format
+See [`DESIGN.md`](DESIGN.md) for architecture notes and threading models for each task (including two data-format
 discrepancies discovered by cross-checking the written spec against the
 provided sample data).
 
@@ -16,14 +15,6 @@ provided sample data).
 | Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [Watch on Google Drive](https://drive.google.com/file/d/1MX7ZFn-WXs9wkCZtJLWy1ZByh8Mt9Ayd/view?usp=sharing) |
 | Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [Watch on Google Drive](https://drive.google.com/file/d/10urt2L4_-be85wKvlOMWdSBv9qost45I/view?usp=sharing) |
 | Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [Watch on Google Drive](https://drive.google.com/file/d/1fUYBXdtku4Z899UY06t1W9Jic5UEP4kr/view?usp=sharing) |
-
-Hosted on Google Drive rather than committed to the repo — GitHub only
-offers real inline playback for videos uploaded through its own web
-editor (drag-and-drop), not for plain git-committed files, which just
-download instead of playing. A hosted link is simpler and works
-reliably everywhere. **Make sure each Drive link's sharing setting is
-"Anyone with the link can view"** before sending this repo along, or the
-reviewer won't be able to open them.
 
 ## Repository layout
 
@@ -117,8 +108,7 @@ discontinuity, a checksum mismatch, and an extended timing gap — see
 ## Tests
 
 Each task with meaningful unit-testable logic (Tasks 1 and 3) ships a
-small, dependency-free test binary (no GoogleTest/Catch2 — consistent
-with the assignment's "avoid third-party libraries" guidance). Run them
+small, dependency-free test binary (no GoogleTest/Catch2 "avoid third-party libraries" guidance). Run them
 directly or via `ctest` from inside each task's `build/` directory:
 
 ```bash
