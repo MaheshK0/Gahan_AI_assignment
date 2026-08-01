@@ -112,3 +112,53 @@ Expected anomaly output (`--summary-only`):
 ## Demo video
 
 [Watch on Google Drive](https://drive.google.com/file/d/1fUYBXdtku4Z899UY06t1W9Jic5UEP4kr/view?usp=sharing)
+
+## Result 
+
+**Build:** CMake configures cleanly, producing `can_decoder_lib`,
+`can_decoder_tests`, and `can_decoder_demo` with no warnings.
+
+**Unit tests — `9/9 checks passed`:** confirms Intel and Motorola bit
+decoding, signed/unsigned signals, checksum/counter/timeout diagnostics,
+and unknown-ID handling all work as designed.
+
+**Real-time run (`--data-dir ../data`):**
+- Loaded 4 DBC messages and 224 log frames, replayed in ~1s at 1.0x speed.
+- `VehicleState` (RPM, Speed, Gear, Brake, Steering) updates live as each
+  frame arrives, each field only changing when its own message is
+  decoded — confirming per-signal, not per-frame, state updates.
+- All three **injected faults** were caught exactly as expected:
+  - **Timeout** — `SteeringData` (0x2B0) went 49ms without a frame
+    against a 30ms threshold, flagged mid-wait rather than only after
+    the next frame arrived.
+  - **Counter gap** — `VehicleSpeed` (0x220) jumped from counter 8 to
+    11 (expected 9), a discontinuity indicating dropped or reordered
+    frames.
+  - **Checksum mismatch** — `EngineData` (0x180) had `0xdf` on the wire
+    where `0x20` was expected.
+- The status line stayed `OK` at every step outside these three
+  moments — anomalies didn't cause false positives elsewhere.
+
+**Accelerated run (`--speed 50`):** identical fault detections and final
+state, just compressed in wall-clock time — confirms detection is driven
+by the frames' own timestamps, not real-time polling artifacts (note the
+timeout is flagged slightly earlier, at 31ms over vs 49ms, since the
+poll interval scales with speed too).
+
+**`--summary-only` run:** isolates just the 3 anomaly lines plus the
+final per-message summary table, showing at a glance that:
+
+| Message | Frames | Counter faults | Checksum faults | Timeouts |
+|---|---|---|---|---|
+| EngineData (0x180) | 51 | 0 | 1 | 0 |
+| BrakeStatus (0x1A0) | 51 | 0 | 0 | 0 |
+| VehicleSpeed (0x220) | 51 | 1 | 0 | 0 |
+| SteeringData (0x2B0) | 71 | 0 | 0 | 1 |
+
+with **0 unknown-ID frames** — every frame in the log matched a known
+message definition.
+
+all three deliberately injected faults were found
+exactly once each, on the correct message, with no false positives —
+demonstrating the diagnostics engine is both sensitive enough to catch
+real issues and precise enough not to cry wolf on healthy traffic.
