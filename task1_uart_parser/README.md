@@ -1,17 +1,9 @@
 # Task 1 — Streaming UART Protocol Parser
 
-## What this is
-
 A parser that reads a stream of raw bytes coming from a UART (serial)
 connection, one byte at a time, and pulls out valid data packets from it
 — while safely ignoring noise, corrupted data, and garbage bytes in
 between.
-
-Think of it like a person listening to a garbled radio transmission:
-most of what comes through is fine, but every so often there's static or
-a dropped word. A good listener doesn't panic or stop listening — they
-just wait for the next clear phrase and keep going. That's exactly what
-this parser does with bytes instead of words.
 
 ## The packet format
 
