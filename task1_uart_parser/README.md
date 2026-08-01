@@ -92,15 +92,6 @@ make -j$(nproc)
 ./uart_parser_demo ../data/uart_stream.bin  # decode the sample stream + print stats
 ```
 
-Expected output (statistics section):
-
-```
-valid_packets    : 8
-crc_failures     : 4
-sync_losses      : 4
-discarded_bytes  : 13
-partial_packets  : 1
-```
 
 ## Design highlights
 
