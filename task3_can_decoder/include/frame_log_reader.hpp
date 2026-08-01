@@ -1,24 +1,28 @@
 #pragma once
-#include <array>
+#include "signal_codec.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace can {
 
-struct LogFrame {
+// One captured frame from frames.log.
+struct RawFrame {
     long timestamp_ms = 0;
     uint32_t can_id = 0;
-    std::array<uint8_t, 8> data{};
+    FramePayload data{};
+    int dlc = 0; // number of payload bytes actually present (<=8)
 };
 
-// Parses frames.log: blank-line-separated 3-line records of
+// Reads frames.log, which is formatted as repeated 3-line blocks separated
+// by blank lines:
 //   <timestamp_ms>
-//   0x<CAN ID hex>
-//   <8 space-separated hex data bytes>
+//   <hex CAN ID, e.g. 0x180>
+//   <space-separated hex payload bytes, e.g. "9C 0C 00 90 00 00 00 00">
 class FrameLogReader {
 public:
-    static std::vector<LogFrame> readAll(const std::string& path);
+    static std::vector<RawFrame> readAll(const std::string& path);
 };
 
 } // namespace can

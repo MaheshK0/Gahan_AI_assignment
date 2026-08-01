@@ -128,111 +128,149 @@ firing a burst of "overdue" events to catch up.
 
 ### Architecture
 
-`DbcDatabase` (message/signal definitions) + `can_decoder.{hpp,cpp}` (pure
-bit-extraction and physical-value decode functions, no state) +
-`VehicleStateManager` (owns the live `VehicleState` plus per-message
-`MessageHealth` diagnostics) + `FrameLogReader` (parses `frames.log`) +
-a single-threaded replay driver in `main.cpp`.
+- `JsonValue` (`json_value.hpp/.cpp`) — a small hand-written recursive-descent
+  JSON parser, just capable enough for `dbc.json`'s schema (objects,
+  strings, numbers, nested objects).
+- `DbcDatabase` (`dbc_database.hpp/.cpp`) — loads `dbc.json` into
+  `MessageDef`/`SignalDef` structs (id, name, `period_ms`, byte order,
+  signals with start bit / length / scale / offset / sign / optional enum
+  table).
+- `SignalCodec` (`signal_codec.hpp/.cpp`) — pure, stateless bit-extraction
+  and physical-value decoding functions (Intel and Motorola, signed and
+  unsigned). No dependency on the rest of the system, which made it easy
+  to unit test in isolation against hand-built byte arrays.
+- `FrameLogReader` (`frame_log_reader.hpp/.cpp`) — parses `frames.log`'s
+  three-line-per-frame format into `RawFrame`s.
+- `DiagnosticsEngine` (`diagnostics.hpp/.cpp`) — counter-gap, checksum, and
+  timeout detection, plus rolling per-message stats and unknown-ID
+  handling. Framework-free: takes a `DbcDatabase` reference and is fed one
+  frame at a time.
+- `VehicleStateUpdater` (`vehicle_state.hpp/.cpp`) — maps a decoded,
+  DBC-known frame onto the flat `CanVehicleState` struct (RPM, Speed,
+  Gear, Brake Status, Steering Angle).
+- `main.cpp` — a single-threaded replay driver that ties the above
+  together, prints per-frame status, and prints a final summary.
 
 Unlike Task 2, nothing in the spec requires concurrent producers for this
-task — `frames.log` is one interleaved trace, decoded and applied in
-timestamp order on a single thread. `VehicleStateManager` still uses a
-mutex internally (negligible cost at this frame rate) so it would need no
-changes to support a future live/multi-threaded source (e.g. SocketCAN).
+task — `frames.log` is a single interleaved trace, so it's decoded and
+applied in timestamp order on one thread. Nothing above is inherently
+single-threaded, though: `SignalCodec` is pure/stateless and
+`DiagnosticsEngine`'s per-ID maps could be sharded or mutex-protected with
+no interface change if a future live source (e.g. SocketCAN) needed a
+dedicated reader thread.
 
-### Finding: `dbc.json` and `vehicle.dbc` use different `start_bit` conventions
+### Using `dbc.json` over `vehicle.dbc`
 
-The assignment states `dbc.json` and `vehicle.dbc` "describe the exact
-same set of messages and signals" and that only one needs to be used. I
-initially reached for `dbc.json` (simpler to parse), but before trusting
-its `start_bit` values for Motorola (big-endian) signals, I verified them
-against `frames.log` the same way as Task 1 — and found `dbc.json`'s
-`start_bit` for `SteeringData.steering_angle` (`0`) does **not** match the
-standard Vector/DBC big-endian bit-numbering convention used by
-`vehicle.dbc`'s own text (`7|16@0-`), even though both files describe the
-same physical bit layout.
+The assignment says both files describe the same messages/signals and
+only one needs to be used. `dbc.json` was chosen because its `start_bit`
+values are plain, already-normalized bit indices rather than the
+DBC-text-format's own big-endian bit-numbering convention (`7|16@0-` for
+a Motorola signal) — using it sidesteps re-implementing that convention
+from scratch just to end up at the same bit layout. `vehicle.dbc` was
+still valuable: its `CM_` comment on the checksum signals is what
+motivated the checksum assumption below, and its `[min|max]` ranges (e.g.
+steering angle `[-780, 780]` degrees) were used as an independent sanity
+check on the decoded values.
 
-Rather than reverse-engineer a second, undocumented convention, this
-project uses **`vehicle.dbc`** as the sole decode source of truth,
-via a small hand-written parser (`dbc_text.cpp`) for the `BO_`/`SG_`/
-`CM_ BO_`/`VAL_` lines it needs. (`dbc.json` is still supported —
-`DbcDatabase::loadFromJson()` exists and produces the same `MessageDef`
-shape — but the demo/tests use the DBC-text loader.)
+### Finding: `dbc.json`'s bit-numbering conventions, verified empirically
 
-**Bit extraction, as implemented and verified:**
-- **Intel (little-endian, `@1`):** `start_bit` is the signal's LSB
-  position in linear `byte*8 + bit` numbering; bits are read from
-  `start_bit` upward, least-significant-first.
-- **Motorola (big-endian, `@0`):** `start_bit` is the signal's MSB
-  position, where `byte_idx = start_bit / 8` and `bit_in_byte = start_bit
-  % 8` (7 = MSB of that byte); bits are read from there towards the LSB,
-  wrapping to bit 7 of the next byte when a byte boundary is crossed.
+Rather than assume a convention, I brute-force-verified the bit layout
+directly against `uart_stream.bin`'s CAN counterpart, `frames.log`, the
+same way Task 1's CRC coverage was verified (see above) — by checking
+which extraction scheme reproduces values that are internally consistent
+(sensible physical ranges, and — decisively — a checksum that validates):
 
-Verification method: decoded `steering_angle` for every `SteeringData`
-frame in `frames.log` and confirmed every value falls inside the DBC's
-own stated range (`[-780, 780]` degrees) — a wrong bit-numbering
-convention produces values wildly outside that range on most frames, so
-this is a strong correctness signal, not a coincidence. The same
-extraction was then independently corroborated by the counter and
-checksum checks below all agreeing frame-for-frame.
+- **Intel (`byte_order: "intel"`):** `start_bit` is the signal's
+  least-significant bit, in linear `byte*8 + bit` numbering counting from
+  bit 0 = LSB of byte 0. Bits are read `start_bit, start_bit+1, ...` and
+  accumulated LSB-first. This is the conventional DBC Intel scheme and
+  matched immediately (confirmed via `EngineData.rpm` and, decisively, via
+  the `VehicleSpeed` counter-gap analysis below lining up frame-for-frame).
+- **Motorola (`byte_order: "motorola"`):** `start_bit` is the signal's
+  most-significant bit, but in `dbc.json` it's expressed as a plain
+  sequential bit index counting from bit 0 = MSB of byte 0, increasing
+  through the byte array in normal reading order (bits 0–7 = byte 0
+  MSB→LSB, bits 8–15 = byte 1 MSB→LSB, ...) — i.e. the whole 8-byte
+  payload treated as one big-endian bit stream, with `length` bits read
+  starting at `start_bit` and accumulated MSB-first.
+
+  I confirmed this by hand-decoding `SteeringData`'s first frame
+  (`FF 8B 00 74 00 00 00 00`) three different ways and checking which one
+  produced self-consistent results: with `start_bit=0, length=16` under
+  the scheme above, `steering_angle` = bytes `FF 8B` read as a 16-bit
+  big-endian value (`0xFF8B` = **−117** signed) × scale `0.1` = **−11.7°**
+  — comfortably inside the DBC's stated `[-780, 780]` range. The 4-bit
+  `counter` (`start_bit=16`) then lands exactly on the top nibble of byte
+  2, and — most convincingly — the 8-bit `checksum` (`start_bit=24`)
+  lands exactly on byte 3, whose value (`0x74`) equals the XOR of the
+  other 7 bytes of that same frame (see below). All three signals only
+  land on clean, byte/nibble-aligned boundaries under this one
+  interpretation, which is strong evidence it's the intended convention
+  rather than a coincidence.
+
+  This convention is documented in `signal_codec.hpp` and implemented in
+  `SignalCodec::extractRaw()`.
 
 ### Checksum validation assumption
 
-`vehicle.dbc` documents the checksum via a `CM_ SG_` comment: *"XOR of
-the other 7 bytes in the frame."* I did not take this on faith either —
-I computed, for every message and every frame in `frames.log`, the XOR
-of the 7 non-checksum bytes and compared it to the transmitted checksum
-byte. Result: it matches on every frame **except one** (see "Injected
-faults" below), which is exactly the signal you'd want from a real
-checksum validator. `computeXorChecksum()` implements this generically:
-it XORs all 8 bytes except whichever byte the message's `checksum` signal
-occupies (looked up from the DBC, not hard-coded per message — this
-matters because the checksum byte's position differs per message:
-byte 3 for `EngineData`/`VehicleSpeed`/`SteeringData`, but byte 1 for
-`BrakeStatus`).
+`vehicle.dbc` documents the checksum via a comment on each `checksum`
+signal: *"XOR of the other 7 bytes in the frame."* This was verified,
+not taken on faith: computing the XOR of the 7 non-checksum bytes for
+every frame in `frames.log` and comparing against the transmitted
+checksum byte matches on every frame **except one** — exactly the signal
+you'd want from a real checksum validator (see "Injected faults" below).
+
+`DiagnosticsEngine::onKnownFrame()` implements this generically: the
+checksum byte's index is derived from the signal's own `start_bit / 8`
+(every checksum signal in this DBC happens to be a single, byte-aligned
+8-bit field, confirmed across all four messages), not hard-coded per
+message — this matters because the byte position differs: byte 3 for
+`EngineData`/`VehicleSpeed`/`SteeringData`, but byte 1 for `BrakeStatus`
+(whose `brake_pressed` + `counter` signals only occupy the first 8 bits).
 
 ### Timeout thresholds, derived from `period_ms`
 
-Each message's timeout threshold is **2.5 × its `period_ms`** (parsed
-from the `CM_ BO_` comment text, e.g. *"transmitted every 20 ms"*, via a
-small regex — `vehicle.dbc`'s text format doesn't carry a structured
-period field the way `dbc.json` does). Rationale: 2.5x tolerates one
-missed frame plus normal scheduling jitter without a false positive,
-while still catching two or more consecutive misses quickly. For
-`SteeringData` (10ms period) that's a 25ms threshold; for the three 20ms
-messages, 50ms.
+Each message's timeout threshold is **`period_ms × 3`**
+(`DiagnosticsEngine::kTimeoutMultiplier`), taken directly from `dbc.json`'s
+`period_ms` field per the assignment's instruction to use it as the
+baseline rather than picking an arbitrary value. Rationale for the 3×
+multiplier: it comfortably tolerates the replay loop's own ~20ms poll
+granularity plus a missed frame or two without false-positiving, while
+still catching the deliberately injected multi-frame gap (see below) in
+well under half the gap's duration. For `SteeringData` (10ms period)
+that's a 30ms threshold; for the three 20ms messages, 60ms.
 
 ### Injected faults found in `frames.log`
 
-Found by exhaustive cross-checking against the DBC (not just spot-checked
-on the first few frames), before writing the diagnostics code that now
-detects them automatically:
+Found by exhaustive cross-checking against the decoded signals (not just
+spot-checked on the first few frames) before the diagnostics code
+existed, then re-confirmed by that same code once written:
 
 1. **Counter discontinuity** on `VehicleSpeed` (`0x220`) at t=500ms: the
    4-bit rolling counter jumps from 8 to 11 (expected 9).
 2. **Checksum mismatch** on `EngineData` (`0x180`) at t=600ms: computed
    XOR is `0x20`, transmitted checksum is `0xDF`.
 3. **Extended timing gap** on `SteeringData` (`0x2B0`): a 310ms gap
-   between t=390ms and t=700ms, against its normal 10ms period — over 12x
-   its nominal period and well past the 25ms timeout threshold. Note this
-   gap is *timing-only*: the counter resumes at the correct next value
+   between t=390ms and t=700ms against its normal 10ms period — 31× its
+   nominal period, and well past the 30ms timeout threshold. This gap is
+   *timing-only*: the counter resumes at the correct next value
    afterwards (no discontinuity), so it's cleanly distinguishable from
    fault #1 by which detector fires.
 
-All three are caught by the demo in real time: faults 1 and 2 appear
-immediately as `!!` diagnostic lines when their frame is processed; fault
-3 causes `overallHealth()` to report `WARNING: SteeringData timeout` for
-the duration of the gap (confirmed by running the demo at real-time
-speed and observing the warning appear at t≈420ms and clear once frames
-resume).
+All three are caught by the demo: faults 1 and 2 print as `!!` diagnostic
+lines the moment their frame is processed (`t=500ms` and `t=600ms`
+respectively); fault 3 is caught proactively — the poll loop notices the
+gap and prints a `TIMEOUT` line at `t≈439ms`, well before the next real
+`SteeringData` frame arrives at `t=700ms`, and the continuous status line
+reports `WARNING: SteeringData missing` for the duration.
 
 ### Unknown CAN IDs
 
-`VehicleStateManager::applyFrame()` looks up the frame's CAN ID in the
-`DbcDatabase` first; if absent, `noteUnknownId()` records it (counted,
-logged as a fault line) and the function returns without touching
-`VehicleState` or any `MessageHealth` entry — no crash, no exception,
-just a diagnostic. (The provided `frames.log` doesn't happen to contain
-any unknown IDs, but this path is exercised by inspection/code review and
-would be straightforward to add a synthetic-frame unit test for if
-desired.)
+`DiagnosticsEngine::onUnknownFrame()` is called whenever `DbcDatabase::find()`
+returns null for a frame's CAN ID: it counts the frame and returns a
+diagnostic `Anomaly` without touching `CanVehicleState` or crashing — the
+demo prints an `??  UNKNOWN` line and moves on. The provided `frames.log`
+doesn't contain any unknown IDs (verified: only `0x180`, `0x1A0`, `0x220`,
+`0x2B0` appear), but this path is covered directly by a unit test
+(`test_diagnostics_unknown_id_does_not_crash`) rather than only by
+inspection.

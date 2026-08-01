@@ -1,38 +1,48 @@
-// CAN decoder + vehicle state demo.
+// CAN decoder & vehicle state demo.
 //
-// Replays frames.log (a captured CAN bus trace), decodes every frame it
-// recognizes against vehicle.dbc, maintains a live VehicleState (RPM,
-// Speed, Gear, Brake Status, Steering Angle), and reports per-message
-// diagnostics: counter-sequence gaps, checksum mismatches, timeouts
-// derived from each message's period_ms, and unknown CAN IDs.
+// Replays frames.log respecting its timestamps, decoding each frame
+// against the DBC-like signal database (dbc.json), maintaining a live
+// VehicleState, and continuously reporting overall system health.
 //
 // Usage:
-//   can_decoder_demo [--speed N] [--data-dir path] [--dbc path/to/vehicle.dbc]
+//   can_decoder_demo [--speed N] [--data-dir path] [--summary-only]
 //
-// See DESIGN.md for the checksum-validation and timeout-threshold
-// assumptions, and for why vehicle.dbc (not dbc.json) is used as the
-// decode source of truth here.
+// Design notes (see DESIGN.md for the full writeup):
+//   - Byte layout / CRC-style conventions for Intel vs Motorola signals
+//     were verified empirically against the sample frames (see
+//     signal_codec.hpp).
+//   - Checksum = XOR of the other 7 bytes in the frame, taken directly
+//     from vehicle.dbc's CM_ comment on the checksum signals and
+//     confirmed against the sample data.
+//   - Timeout threshold per message = period_ms * 3, to tolerate replay
+//     jitter while still catching the deliberately injected ~310ms gap
+//     on SteeringData (period 10ms) well before the next frame arrives.
+//   - frames.log only contains the 4 documented CAN IDs, but unknown IDs
+//     are still handled defensively (logged, counted, never crash).
 
-#include "dbc.hpp"
-#include "can_decoder.hpp"
+#include "dbc_database.hpp"
+#include "diagnostics.hpp"
 #include "frame_log_reader.hpp"
+#include "signal_codec.hpp"
 #include "vehicle_state.hpp"
 
+#include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
-#include <mutex>
+#include <string>
 #include <thread>
 
 using namespace can;
+using Clock = std::chrono::steady_clock;
 
 namespace {
 
 struct Args {
     double speed = 1.0;
     std::string data_dir = "task3_can_decoder/data";
-    std::string dbc_path; // defaults to data_dir + "/vehicle.dbc"
+    bool summary_only = false;
 };
 
 Args parseArgs(int argc, char** argv) {
@@ -45,26 +55,30 @@ Args parseArgs(int argc, char** argv) {
         };
         if (arg == "--speed") a.speed = std::stod(next("--speed"));
         else if (arg == "--data-dir") a.data_dir = next("--data-dir");
-        else if (arg == "--dbc") a.dbc_path = next("--dbc");
+        else if (arg == "--summary-only") a.summary_only = true;
         else if (arg == "--help") {
-            std::cout << "Usage: " << argv[0] << " [--speed N] [--data-dir path] [--dbc path]\n";
+            std::cout << "Usage: " << argv[0] << " [--speed N] [--data-dir path] [--summary-only]\n";
             std::exit(0);
         } else {
             std::cerr << "Unknown argument: " << arg << "\n";
             std::exit(1);
         }
     }
-    if (a.dbc_path.empty()) a.dbc_path = a.data_dir + "/vehicle.dbc";
     return a;
 }
 
-void printState(const VehicleState& s) {
-    std::printf("RPM=%-8s Speed=%-10s Gear=%-4s Brake=%-4s Steering=%-9s",
-        s.rpm ? (std::to_string(static_cast<int>(*s.rpm)) + "rpm").c_str() : "--",
-        s.speed_kmh ? (std::to_string(*s.speed_kmh).substr(0, 5) + "km/h").c_str() : "--",
-        s.gear ? s.gear->c_str() : "--",
-        s.brake_pressed ? (*s.brake_pressed ? "ON" : "OFF") : "--",
-        s.steering_deg ? (std::to_string(*s.steering_deg).substr(0, 6) + "deg").c_str() : "--");
+std::string gearOrDash(const CanVehicleState& s) { return s.gear.value_or("-"); }
+
+void printStatusLine(long log_ms, const CanVehicleState& state, bool healthy, const std::string& reason) {
+    std::printf("[t=%5ldms] RPM=%-8s Speed=%-9s Gear=%-3s Brake=%-5s Steer=%-9s  %s%s\n",
+        log_ms,
+        state.rpm ? (std::to_string(static_cast<int>(*state.rpm)) + "rpm").c_str() : "-",
+        state.speed_kmh ? (std::to_string(*state.speed_kmh).substr(0, 5) + "km/h").c_str() : "-",
+        gearOrDash(state).c_str(),
+        state.brake_pressed ? (*state.brake_pressed ? "ON" : "off") : "-",
+        state.steering_angle_deg ? (std::to_string(*state.steering_angle_deg).substr(0, 6) + "deg").c_str() : "-",
+        healthy ? "OK" : "WARNING",
+        reason.empty() ? "" : (": " + reason).c_str());
 }
 
 } // namespace
@@ -73,57 +87,108 @@ int main(int argc, char** argv) {
     Args args = parseArgs(argc, argv);
 
     DbcDatabase db;
-    std::vector<LogFrame> frames;
+    std::vector<RawFrame> frames;
     try {
-        db = DbcDatabase::loadFromDbcText(args.dbc_path);
+        db = DbcDatabase::loadFromJsonFile(args.data_dir + "/dbc.json");
         frames = FrameLogReader::readAll(args.data_dir + "/frames.log");
     } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << "\n";
+        std::cerr << "Error loading input data: " << e.what() << "\n";
         return 1;
     }
+    std::sort(frames.begin(), frames.end(),
+              [](const RawFrame& a, const RawFrame& b) { return a.timestamp_ms < b.timestamp_ms; });
 
-    std::printf("Loaded %zu message definitions from vehicle.dbc:\n", db.messages().size());
-    for (const auto& [id, msg] : db.messages()) {
-        std::printf("  0x%03X %-14s period=%3ums  byte_order=%s  signals=%zu\n",
-            id, msg.name.c_str(), msg.period_ms,
-            msg.byte_order == ByteOrder::Intel ? "intel" : "motorola", msg.signals.size());
-    }
-    std::printf("Loaded %zu frames from frames.log. Replay speed = %.2fx\n\n", frames.size(), args.speed);
+    std::printf("Loaded %zu messages from DBC, %zu frames from log. Replay speed = %.2fx\n\n",
+                db.messages().size(), frames.size(), args.speed);
 
-    VehicleStateManager manager(db);
+    DiagnosticsEngine diag(db);
+    VehicleStateUpdater updater;
+    CanVehicleState state;
 
-    const auto start = Clock::now();
-    std::mutex cv_mutex;
-    std::condition_variable cv;
+    const auto wallStart = Clock::now();
+    auto logMsNow = [&]() -> long {
+        auto elapsed = std::chrono::duration<double, std::milli>(Clock::now() - wallStart).count();
+        return static_cast<long>(elapsed * args.speed);
+    };
 
-    for (const auto& frame : frames) {
-        auto target = start + std::chrono::milliseconds(
-            static_cast<long long>(frame.timestamp_ms / args.speed));
-        std::unique_lock<std::mutex> lock(cv_mutex);
-        cv.wait_until(lock, target); // sleeps without busy-waiting; nothing ever notifies it early, so it simply wakes at `target`
-        lock.unlock();
+    // Poll cadence for timeout checks / status prints between frame
+    // arrivals (a blocking sleep, not a busy loop).
+    const auto pollInterval = std::chrono::milliseconds(20);
 
-        manager.applyFrame(frame.can_id, frame.data, frame.timestamp_ms);
+    size_t frameIdx = 0;
+    long lastPrintedMs = -1000;
+    std::string lastHealthReason;
 
-        auto snap = manager.snapshot();
-        for (const auto& fault : snap.recentFaults) {
-            std::printf("  !! %s\n", fault.c_str());
+    while (frameIdx < frames.size()) {
+        const RawFrame& next = frames[frameIdx];
+        const auto targetWall = wallStart +
+            std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double, std::milli>(next.timestamp_ms / args.speed));
+
+        // Wait for the next frame's arrival time, but wake periodically to
+        // run timeout checks / status prints in the meantime (this is how
+        // a >period_ms gap, like the injected SteeringData stall, gets
+        // surfaced promptly instead of only being noticed when the next
+        // frame finally shows up).
+        while (Clock::now() < targetWall) {
+            std::this_thread::sleep_for(std::min(pollInterval,
+                std::chrono::duration_cast<std::chrono::milliseconds>(targetWall - Clock::now())));
+            long nowMs = logMsNow();
+            auto timeoutAnomalies = diag.checkTimeouts(nowMs);
+            for (const auto& a : timeoutAnomalies) {
+                std::printf("  !! [t=%5ldms] TIMEOUT  %-14s 0x%03X  %s\n",
+                            a.timestamp_ms, a.message_name.c_str(), a.can_id, a.detail.c_str());
+            }
+            if (!args.summary_only && (nowMs - lastPrintedMs >= 100)) {
+                bool anyTimedOut = false;
+                std::string reason;
+                for (const auto& [id, msg] : db.messages()) {
+                    if (diag.isCurrentlyTimedOut(id, nowMs)) {
+                        anyTimedOut = true;
+                        reason = msg.name + " missing";
+                        break;
+                    }
+                }
+                printStatusLine(nowMs, state, !anyTimedOut, reason);
+                lastPrintedMs = nowMs;
+            }
         }
-        std::printf("[t=%5ldms] ", frame.timestamp_ms);
-        printState(snap.state);
-        std::printf("  health=%s\n", manager.overallHealth().c_str());
+
+        // Frame has "arrived": decode it.
+        const MessageDef* msg = db.find(next.can_id);
+        if (!msg) {
+            Anomaly a = diag.onUnknownFrame(next);
+            std::printf("  ?? [t=%5ldms] UNKNOWN  0x%03X  %s\n", a.timestamp_ms, a.can_id, a.detail.c_str());
+        } else {
+            auto anomalies = diag.onKnownFrame(*msg, next);
+            updater.apply(*msg, next, state);
+            for (const auto& a : anomalies) {
+                const char* label = (a.kind == AnomalyKind::CounterGap) ? "CTR_GAP " : "CHKSUM  ";
+                std::printf("  !! [t=%5ldms] %s %-14s 0x%03X  %s\n",
+                            a.timestamp_ms, label, a.message_name.c_str(), a.can_id, a.detail.c_str());
+            }
+            if (!args.summary_only) {
+                long nowMs = next.timestamp_ms;
+                bool anyTimedOut = diag.isCurrentlyTimedOut(next.can_id, nowMs);
+                printStatusLine(nowMs, state, !anyTimedOut, anyTimedOut ? (msg->name + " missing") : "");
+                lastPrintedMs = nowMs;
+            }
+        }
+        ++frameIdx;
     }
 
     std::printf("\n--- Per-message summary ---\n");
-    auto finalSnap = manager.snapshot();
-    for (const auto& [id, h] : finalSnap.health) {
-        std::printf("0x%03X %-14s frames_received=%-4llu counter_faults=%-3llu checksum_faults=%-3llu\n",
-            id, h.name.c_str(),
-            static_cast<unsigned long long>(h.frames_received),
-            static_cast<unsigned long long>(h.counter_faults),
-            static_cast<unsigned long long>(h.checksum_faults));
+    for (const auto& [id, msg] : db.messages()) {
+        const auto it = diag.stats().find(id);
+        MessageStats st = (it != diag.stats().end()) ? it->second : MessageStats{};
+        std::printf("0x%03X %-14s frames=%-4llu counter_faults=%-3llu checksum_faults=%-3llu timeout_events=%-3llu\n",
+                    id, msg.name.c_str(),
+                    static_cast<unsigned long long>(st.frames_received),
+                    static_cast<unsigned long long>(st.counter_faults),
+                    static_cast<unsigned long long>(st.checksum_faults),
+                    static_cast<unsigned long long>(st.timeout_events));
     }
-    std::printf("\nFinal overall health: %s\n", manager.overallHealth().c_str());
+    std::printf("Unknown-ID frames: %llu\n", static_cast<unsigned long long>(diag.unknownFrameCount()));
 
     return 0;
 }

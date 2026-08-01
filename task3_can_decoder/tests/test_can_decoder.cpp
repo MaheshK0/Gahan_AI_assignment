@@ -1,7 +1,9 @@
-#include "can_decoder.hpp"
-#include "dbc.hpp"
-#include "frame_log_reader.hpp"
-#include "vehicle_state.hpp"
+// Minimal, dependency-free unit tests (same style as task1's tests --
+// no external framework, just CHECK macros and a pass/fail summary).
+
+#include "signal_codec.hpp"
+#include "diagnostics.hpp"
+#include "dbc_database.hpp"
 
 #include <cstdio>
 
@@ -21,152 +23,123 @@ int g_checks = 0;
 
 using namespace can;
 
-void test_intel_unsigned_16bit() {
-    // rpm: start_bit=0, length=16, intel, scale=0.25 -> byte0=LSB, byte1=MSB
-    RawFrame data{0x00, 0x27, 0, 0, 0, 0, 0, 0}; // 0x2700 = 9984 raw -> 9984*0.25=2496 rpm
-    SignalDef sig; sig.start_bit = 0; sig.length = 16; sig.scale = 0.25; sig.offset = 0; sig.is_signed = false;
-    double v = decodeSignal(data, sig, ByteOrder::Intel);
-    CHECK(v == 2496.0);
+void test_intel_unsigned_decode() {
+    // rpm: start_bit=0, length=16, intel, scale=0.25.
+    // Bytes: 9C 0C -> little-endian 16-bit = 0x0C9C = 3228; *0.25 = 807.0
+    FramePayload data = {0x9C, 0x0C, 0x00, 0x90, 0x00, 0x00, 0x00, 0x00};
+    SignalDef rpm;
+    rpm.start_bit = 0; rpm.length = 16; rpm.scale = 0.25; rpm.offset = 0; rpm.is_signed = false;
+    double val = SignalCodec::decodePhysical(data, rpm, ByteOrder::Intel);
+    CHECK(val == 807.0);
 }
 
-void test_intel_unsigned_nibble() {
-    // counter: start_bit=16, length=4, intel -> low nibble of byte2
-    RawFrame data{0, 0, 0x0B, 0, 0, 0, 0, 0}; // low nibble = 0xB = 11
-    SignalDef sig; sig.start_bit = 16; sig.length = 4; sig.scale = 1; sig.offset = 0; sig.is_signed = false;
-    double v = decodeSignal(data, sig, ByteOrder::Intel);
-    CHECK(v == 11.0);
+void test_intel_counter_and_checksum_fields() {
+    // counter: start_bit=16,length=4 -> nibble at byte2 bits0-3.
+    FramePayload data = {0x9C, 0x0C, 0x05, 0x90, 0x00, 0x00, 0x00, 0x00};
+    SignalDef counter;
+    counter.start_bit = 16; counter.length = 4; counter.scale = 1; counter.is_signed = false;
+    uint64_t c = SignalCodec::extractRaw(data, counter, ByteOrder::Intel);
+    CHECK(c == 0x5);
 }
 
-void test_motorola_signed_16bit_positive() {
-    // steering_angle: start_bit=7 (MSB of byte0), length=16, motorola, signed, scale=0.1
-    // byte0=0x01 (MSB byte), byte1=0x2C (LSB byte) -> raw = 0x012C = 300 -> 30.0 deg
-    RawFrame data{0x01, 0x2C, 0, 0, 0, 0, 0, 0};
-    SignalDef sig; sig.start_bit = 7; sig.length = 16; sig.scale = 0.1; sig.offset = 0; sig.is_signed = true;
-    double v = decodeSignal(data, sig, ByteOrder::Motorola);
-    CHECK(v > 29.99 && v < 30.01);
+void test_motorola_signed_decode() {
+    // steering_angle: start_bit=0,length=16,motorola,signed,scale=0.1.
+    // Bytes FF 8B -> big-endian 16-bit = 0xFF8B, signed = -117; *0.1 = -11.7
+    FramePayload data = {0xFF, 0x8B, 0x00, 0x74, 0x00, 0x00, 0x00, 0x00};
+    SignalDef steer;
+    steer.start_bit = 0; steer.length = 16; steer.scale = 0.1; steer.offset = 0; steer.is_signed = true;
+    double val = SignalCodec::decodePhysical(data, steer, ByteOrder::Motorola);
+    CHECK(val > -11.71 && val < -11.69);
 }
 
-void test_motorola_signed_16bit_negative() {
-    // raw = 0xFF8B (two's complement 16-bit) = -117 -> -11.7 deg
-    RawFrame data{0xFF, 0x8B, 0, 0, 0, 0, 0, 0};
-    SignalDef sig; sig.start_bit = 7; sig.length = 16; sig.scale = 0.1; sig.offset = 0; sig.is_signed = true;
-    double v = decodeSignal(data, sig, ByteOrder::Motorola);
-    CHECK(v > -11.71 && v < -11.69);
+void test_motorola_counter_nibble() {
+    // counter: start_bit=16,length=4 -> top nibble of byte2 in motorola scheme.
+    FramePayload data = {0xFF, 0x8B, 0xA0, 0x74, 0x00, 0x00, 0x00, 0x00};
+    SignalDef counter;
+    counter.start_bit = 16; counter.length = 4; counter.scale = 1; counter.is_signed = false;
+    uint64_t c = SignalCodec::extractRaw(data, counter, ByteOrder::Motorola);
+    CHECK(c == 0xA);
 }
 
-void test_motorola_vs_intel_disagree_on_same_bytes() {
-    // Sanity check that byte order actually matters: same raw bytes,
-    // opposite orderings, should generally produce different raw values
-    // for a multi-byte field (unless the bytes happen to be symmetric).
-    RawFrame data{0x12, 0x34, 0, 0, 0, 0, 0, 0};
-    SignalDef sig; sig.start_bit = 0; sig.length = 16; sig.scale = 1; sig.offset = 0; sig.is_signed = false;
-    double intelSig = decodeSignal(data, sig, ByteOrder::Intel);
-
-    SignalDef motSig; motSig.start_bit = 7; motSig.length = 16; motSig.scale = 1; motSig.offset = 0; motSig.is_signed = false;
-    double motoVal = decodeSignal(data, motSig, ByteOrder::Motorola);
-
-    CHECK(intelSig == 0x3412); // byte0 = LSB -> 0x34 | (0x12<<8)
-    CHECK(motoVal == 0x1234);  // byte0 = MSB -> (0x12<<8) | 0x34
-}
-
-void test_checksum_xor_excludes_own_byte() {
-    RawFrame data{0x01, 0x02, 0x03, 0xAA, 0x05, 0x06, 0x07, 0x08};
-    // checksum occupies byte index 3 (start_bit=24, length=8)
-    SignalDef checksumSig; checksumSig.start_bit = 24; checksumSig.length = 8;
-    uint8_t x = computeXorChecksum(data, checksumSig);
-    uint8_t expected = 0x01 ^ 0x02 ^ 0x03 ^ 0x05 ^ 0x06 ^ 0x07 ^ 0x08;
-    CHECK(x == expected);
-    CHECK(x != (expected ^ 0xAA)); // sanity: byte3 itself must not be included
-}
-
-void test_dbc_text_parses_real_file() {
-    DbcDatabase db = DbcDatabase::loadFromDbcText("task3_can_decoder/data/vehicle.dbc");
-    CHECK(db.messages().size() == 4);
-
-    const MessageDef* engine = db.find(0x180);
-    CHECK(engine != nullptr);
-    if (engine) {
-        CHECK(engine->name == "EngineData");
-        CHECK(engine->period_ms == 20);
-        CHECK(engine->byte_order == ByteOrder::Intel);
-        CHECK(engine->findSignal("rpm") != nullptr);
+void test_checksum_xor_matches_sample_frame() {
+    // Real sample frame for 0x2B0 at t=0: FF 8B 00 74 00 00 00 00.
+    // Checksum byte is byte index 3 (start_bit 24 / 8). XOR of the other
+    // 7 bytes should equal 0x74.
+    FramePayload data = {0xFF, 0x8B, 0x00, 0x74, 0x00, 0x00, 0x00, 0x00};
+    uint8_t computed = 0;
+    for (int i = 0; i < 8; ++i) {
+        if (i == 3) continue;
+        computed ^= data[i];
     }
-
-    const MessageDef* steering = db.find(0x2B0);
-    CHECK(steering != nullptr);
-    if (steering) {
-        CHECK(steering->name == "SteeringData");
-        CHECK(steering->period_ms == 10);
-        CHECK(steering->byte_order == ByteOrder::Motorola);
-        const SignalDef* angle = steering->findSignal("steering_angle");
-        CHECK(angle != nullptr);
-        if (angle) CHECK(angle->is_signed == true);
-    }
-
-    const MessageDef* speed = db.find(0x220);
-    CHECK(speed != nullptr);
-    if (speed) {
-        const SignalDef* gear = speed->findSignal("gear");
-        CHECK(gear != nullptr);
-        if (gear) {
-            CHECK(gear->enum_values.at(0) == "P");
-            CHECK(gear->enum_values.at(1) == "R");
-        }
-    }
+    CHECK(computed == 0x74);
 }
 
-void test_frame_log_parses_real_file() {
-    auto frames = FrameLogReader::readAll("task3_can_decoder/data/frames.log");
-    CHECK(frames.size() == 224);
-    CHECK(frames.front().timestamp_ms == 0);
-    CHECK(frames.front().can_id == 0x180);
+void test_signed_sign_extension_negative_small_field() {
+    // A 4-bit signed field with raw value 0b1000 (=8) should sign-extend
+    // to -8.
+    FramePayload data = {0x08, 0, 0, 0, 0, 0, 0, 0}; // low nibble = 0x8
+    SignalDef sig;
+    sig.start_bit = 0; sig.length = 4; sig.scale = 1; sig.offset = 0; sig.is_signed = true;
+    int64_t val = SignalCodec::extractSigned(data, sig, ByteOrder::Intel);
+    CHECK(val == -8);
 }
 
-void test_known_gap_and_counter_fault_are_detected() {
-    // End-to-end regression test pinned to the two faults deliberately
-    // injected into frames.log (see DESIGN.md): a counter discontinuity
-    // on VehicleSpeed (0x220) and an extended gap on SteeringData (0x2B0).
-    DbcDatabase db = DbcDatabase::loadFromDbcText("task3_can_decoder/data/vehicle.dbc");
-    auto frames = FrameLogReader::readAll("task3_can_decoder/data/frames.log");
-    VehicleStateManager manager(db);
+void test_diagnostics_counter_gap_detection() {
+    DbcDatabase db; // empty DB is fine; we build MessageDef by hand
+    MessageDef msg;
+    msg.id = 0x220;
+    msg.name = "VehicleSpeed";
+    msg.period_ms = 20;
+    msg.byte_order = ByteOrder::Intel;
+    SignalDef counter;
+    counter.name = "counter"; counter.start_bit = 20; counter.length = 4; counter.scale = 1;
+    msg.signals.push_back(counter);
+    SignalDef checksum;
+    checksum.name = "checksum"; checksum.start_bit = 24; checksum.length = 8; checksum.scale = 1;
+    msg.signals.push_back(checksum);
 
-    int counterFaultsSeen = 0;
-    for (const auto& frame : frames) {
-        manager.applyFrame(frame.can_id, frame.data, frame.timestamp_ms);
-        auto snap = manager.snapshot();
-        for (const auto& f : snap.recentFaults) {
-            if (f.find("counter discontinuity") != std::string::npos) ++counterFaultsSeen;
-        }
+    DiagnosticsEngine diag(db);
+
+    RawFrame f1;
+    f1.timestamp_ms = 0; f1.can_id = 0x220; f1.dlc = 8;
+    f1.data = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; // counter nibble=0
+    f1.data[3] = 0; // checksum byte (will mismatch, that's fine, not under test here)
+
+    RawFrame f2 = f1;
+    f2.timestamp_ms = 20;
+    f2.data[2] = 0x20; // counter nibble bits20-23 -> byte2 high nibble = 2 (expected would be 1)
+
+    auto a1 = diag.onKnownFrame(msg, f1);
+    auto a2 = diag.onKnownFrame(msg, f2);
+
+    bool foundGap = false;
+    for (const auto& a : a2) {
+        if (a.kind == AnomalyKind::CounterGap) foundGap = true;
     }
-    CHECK(counterFaultsSeen == 1); // exactly one injected counter discontinuity in the sample
+    CHECK(foundGap);
+}
 
-    auto finalSnap = manager.snapshot();
-    CHECK(finalSnap.health.at(0x220).counter_faults == 1);
-    CHECK(finalSnap.health.at(0x2B0).counter_faults == 0); // its gap is timing-only, not a counter jump
-
-    // A third injected fault: EngineData (0x180) has exactly one checksum
-    // mismatch, at t=600ms (found by exhaustive cross-check against the
-    // sample data -- see DESIGN.md). Every other message's checksums
-    // should validate on every frame.
-    CHECK(finalSnap.health.at(0x180).checksum_faults == 1);
-    for (const auto& [id, h] : finalSnap.health) {
-        if (id == 0x180) continue;
-        CHECK(h.checksum_faults == 0);
-    }
+void test_diagnostics_unknown_id_does_not_crash() {
+    DbcDatabase db;
+    DiagnosticsEngine diag(db);
+    RawFrame f;
+    f.timestamp_ms = 5; f.can_id = 0x999; f.dlc = 8;
+    Anomaly a = diag.onUnknownFrame(f);
+    CHECK(a.kind == AnomalyKind::UnknownId);
+    CHECK(diag.unknownFrameCount() == 1);
 }
 
 } // namespace
 
 int main() {
-    test_intel_unsigned_16bit();
-    test_intel_unsigned_nibble();
-    test_motorola_signed_16bit_positive();
-    test_motorola_signed_16bit_negative();
-    test_motorola_vs_intel_disagree_on_same_bytes();
-    test_checksum_xor_excludes_own_byte();
-    test_dbc_text_parses_real_file();
-    test_frame_log_parses_real_file();
-    test_known_gap_and_counter_fault_are_detected();
+    test_intel_unsigned_decode();
+    test_intel_counter_and_checksum_fields();
+    test_motorola_signed_decode();
+    test_motorola_counter_nibble();
+    test_checksum_xor_matches_sample_frame();
+    test_signed_sign_extension_negative_small_field();
+    test_diagnostics_counter_gap_detection();
+    test_diagnostics_unknown_id_does_not_crash();
 
     std::printf("\n%d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

@@ -6,44 +6,64 @@
 
 namespace can {
 
-std::vector<LogFrame> FrameLogReader::readAll(const std::string& path) {
+namespace {
+
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+} // namespace
+
+std::vector<RawFrame> FrameLogReader::readAll(const std::string& path) {
     std::ifstream f(path);
-    if (!f) throw std::runtime_error("Could not open frames.log: " + path);
+    if (!f) throw std::runtime_error("Could not open frame log: " + path);
 
-    std::vector<LogFrame> frames;
+    std::vector<RawFrame> frames;
     std::string line;
-    std::vector<std::string> record;
+    int fieldIdx = 0; // 0=timestamp, 1=id, 2=payload
+    RawFrame current;
 
-    auto flushRecord = [&]() {
-        if (record.empty()) return;
-        if (record.size() != 3) {
-            throw std::runtime_error("frames.log: malformed record (expected 3 lines, got " +
-                                      std::to_string(record.size()) + ")");
+    auto flushIfComplete = [&](bool haveAllFields) {
+        if (haveAllFields) {
+            frames.push_back(current);
         }
-        LogFrame frame;
-        frame.timestamp_ms = std::stol(record[0]);
-        frame.can_id = static_cast<uint32_t>(std::stoul(record[1], nullptr, 16));
-
-        std::istringstream ss(record[2]);
-        std::string byteStr;
-        size_t i = 0;
-        while (ss >> byteStr && i < frame.data.size()) {
-            frame.data[i++] = static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16));
-        }
-        frames.push_back(frame);
-        record.clear();
+        current = RawFrame{};
+        fieldIdx = 0;
     };
 
     while (std::getline(f, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (line.empty()) {
-            flushRecord();
+        std::string t = trim(line);
+        if (t.empty()) {
+            // Blank line: if we already had a complete record buffered,
+            // this is just the separator after it (already flushed below);
+            // if we're mid-record with too few fields, treat as a
+            // malformed/incomplete record and skip it rather than crash.
             continue;
         }
-        record.push_back(line);
+        if (fieldIdx == 0) {
+            current.timestamp_ms = std::stol(t);
+            fieldIdx = 1;
+        } else if (fieldIdx == 1) {
+            current.can_id = static_cast<uint32_t>(std::stoul(t, nullptr, 16));
+            fieldIdx = 2;
+        } else if (fieldIdx == 2) {
+            std::istringstream iss(t);
+            std::string byteStr;
+            int i = 0;
+            current.data.fill(0);
+            while (iss >> byteStr && i < 8) {
+                current.data[i++] = static_cast<uint8_t>(std::stoul(byteStr, nullptr, 16));
+            }
+            current.dlc = i;
+            flushIfComplete(true);
+        }
     }
-    flushRecord();
-
+    // Any dangling partial record at EOF (fieldIdx != 0) is silently
+    // dropped rather than causing a crash -- a malformed trailing record
+    // isn't decodable and shouldn't take down the whole replay.
     return frames;
 }
 

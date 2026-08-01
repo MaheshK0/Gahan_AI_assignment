@@ -28,10 +28,11 @@ sudo apt-get update
 sudo apt-get install -y build-essential cmake git
 ```
 
-Requires a C++17 compiler (GCC 9+; verified on 24.04.4 running GCC 13.3)
-and CMake 3.16+. No third-party libraries are used anywhere in the
+Requires a C++17 compiler (GCC 9+; verified on Ubuntu 24.04 running GCC
+13.3) and CMake 3.16+. No third-party libraries are used anywhere in the
 codebase beyond the C++ standard library and `pthread` (via
-`Threads::Threads` in Task 2/3, for the producer threads).
+`Threads::Threads`, needed only by Task 2 for its producer threads —
+Task 1 and Task 3 are single-threaded).
 
 ## Task 1 — Streaming UART Protocol Parser
 
@@ -73,23 +74,17 @@ mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 
-./can_decoder_tests                    # unit tests (34 checks)
+./can_decoder_tests                          # unit tests (9 checks)
+./can_decoder_demo --data-dir ../data         # real-time replay (~1s)
+./can_decoder_demo --data-dir ../data --speed 50   # accelerated replay
+./can_decoder_demo --data-dir ../data --summary-only  # just the anomaly lines + final summary
 ```
 
-The demo's default data paths are relative to the **repository root**
-(not the `build/` directory), so run it from there:
-
-```bash
-cd ../..    # back to repo root
-./task3_can_decoder/build/can_decoder_demo                 # real-time replay (~1s)
-./task3_can_decoder/build/can_decoder_demo --speed 50       # accelerated replay
-```
-
-This prints per-frame decoded vehicle state, flags the three faults
-deliberately injected into `frames.log` as they occur (a counter
+This prints per-frame decoded vehicle state (RPM / Speed / Gear / Brake /
+Steering) with a continuous OK/WARNING health line, flags the three
+faults deliberately injected into `frames.log` as they occur (a counter
 discontinuity, a checksum mismatch, and an extended timing gap — see
-`DESIGN.md`), and prints a per-message summary + final health status at
-the end.
+`DESIGN.md`), and prints a per-message summary at the end.
 
 ## Tests
 
