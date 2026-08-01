@@ -6,14 +6,7 @@ Status, Steering Angle), and reports counter/checksum/timeout anomalies —
 including the three faults deliberately injected into the sample log.
 
 See the root [`DESIGN.md`](../DESIGN.md#task-3--can-decoder--vehicle-state)
-for the full architecture writeup, including two things worth reading
-before the interview discussion:
-- How the Motorola (big-endian) bit-numbering convention used by
-  `dbc.json` was empirically verified (not assumed) against the sample
-  frames.
-- How the checksum algorithm (XOR of the other 7 bytes) was confirmed
-  against every frame in the log, and how the three injected faults were
-  found.
+for the full architecture writeup.
 
 ## Architecture
 
