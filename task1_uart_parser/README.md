@@ -122,5 +122,6 @@ partial_packets  : 1
 
 ## Demo video
 
-[Add a link or embedded video of this task's demo here — see the root
-README's "Demo Videos" section for instructions.]
+[`demos/task1_uart_parser.mp4`](../demos/task1_uart_parser.mp4) (repo
+root) — see [`demos/README.md`](../demos/README.md) if it's not there
+yet.

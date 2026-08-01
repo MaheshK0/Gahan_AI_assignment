@@ -13,32 +13,14 @@ provided sample data).
 
 | Task | Description | Video |
 |------|--------------|-------|
-| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | _add link_ |
-| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | _add link_ |
-| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | _add link_ |
+| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [demos/task1_uart_parser.mp4](demos/task1_uart_parser.mp4) |
+| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [demos/task2_sensor_aggregator.mp4](demos/task2_sensor_aggregator.mp4) |
+| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [demos/task3_can_decoder.mp4](demos/task3_can_decoder.mp4) |
 
-**How to add these:** record a short terminal session of each task's demo
-(the exact commands are in each task's own README, linked above), then
-either:
-
-1. **Easiest — drag-and-drop into GitHub:** open this README for editing
-   directly on github.com (pencil icon), then drag your `.mp4`/`.mov`
-   file into the edit box. GitHub uploads it to its asset CDN and inserts
-   a working embed link automatically — replace the `_add link_`
-   placeholders above with what it generates. This only works through the
-   web UI, not a plain `git push` of a video file.
-2. **Hosted elsewhere:** upload to YouTube (unlisted is fine), Loom, or
-   similar, and just paste the link in place of `_add link_` above.
-3. **Terminal recording instead of screen capture:** tools like
-   [`asciinema`](https://asciinema.org/) or
-   [`vhs`](https://github.com/charmbracelet/vhs) record your terminal
-   session as a small, scrubbable recording (asciinema hosts it for you
-   with one command: `asciinema rec`, then `asciinema upload`) — often
-   nicer than a screen-recorded video for a CLI demo like these three.
-
-Each task's own `README.md` also has a placeholder "Demo video" section
-at the bottom if you'd rather link the recording there instead of (or in
-addition to) this table.
+Recordings live in [`demos/`](demos/) — see that folder's
+[`README.md`](demos/README.md) for the expected filenames, a note on
+GitHub's file-size limits, and how to get inline playback vs. a plain
+download link.
 
 ## Repository layout
 

@@ -111,5 +111,6 @@ Expected anomaly output (`--summary-only`):
 
 ## Demo video
 
-[Add a link or embedded video of this task's demo here — see the root
-README's "Demo Videos" section for instructions.]
+[`demos/task3_can_decoder.mp4`](../demos/task3_can_decoder.mp4) (repo
+root) — see [`demos/README.md`](../demos/README.md) if it's not there
+yet.
