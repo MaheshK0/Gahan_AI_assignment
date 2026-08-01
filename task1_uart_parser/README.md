@@ -144,3 +144,62 @@ Then, from inside `build/`:
 ## Demo video
 
 [Watch on Google Drive](https://drive.google.com/file/d/1MX7ZFn-WXs9wkCZtJLWy1ZByh8Mt9Ayd/view?usp=sharing)
+
+## Result explanation
+
+Output from an actual build + run:
+
+```
+$ ./uart_parser_tests
+30/30 checks passed
+
+$ ./uart_parser_demo ../data/uart_stream.bin
+PACKET  type=0x01  len=  3  payload=10 20 30
+PACKET  type=0x02  len=  0  payload=
+PACKET  type=0x01  len=  2  payload=DE AD
+PACKET  type=0x04  len=  1  payload=99
+PACKET  type=0x07  len=  2  payload=CA FE
+PACKET  type=0x08  len= 20  payload=00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 11 12 13
+PACKET  type=0x01  len=  0  payload=
+PACKET  type=0x0A  len=  1  payload=42
+--- Parser statistics ---
+valid_packets    : 8
+crc_failures     : 4
+sync_losses      : 4
+discarded_bytes  : 13
+partial_packets  : 1
+```
+
+**Build:** CMake configures a Release build with GCC, producing three
+targets — `uart_parser_lib` (the static library), `uart_parser_tests`,
+and `uart_parser_demo`. All three link cleanly with no warnings shown.
+
+**Test run — `30/30 checks passed`:** every unit test passes, meaning
+the state machine's handling of valid packets, corrupted CRCs,
+truncated streams, and edge cases (zero-length payload, back-to-back
+SOF bytes, etc.) all behave as expected.
+
+**Demo run — decoding `uart_stream.bin`:**
+
+- **8 valid packets** were extracted from the stream, with payload
+  lengths ranging from 0 bytes up to 20 bytes, across several
+  different `Type` values (`0x01`, `0x02`, `0x04`, `0x07`, `0x08`,
+  `0x0A`). This confirms the parser correctly handles the full
+  length range, not just a single fixed size.
+- **4 CRC failures** — packets that were framed correctly (valid
+  SOF1/SOF2/Length/Type) but whose checksum didn't match. The
+  parser detected the mismatch, discarded the packet, and resumed
+  hunting for the next start marker rather than misinterpreting
+  corrupted data as valid.
+- **4 sync losses** — points in the stream where the parser had to
+  drop out of an in-progress packet and go back to searching for
+  `0xAA 0x55`, typically because unexpected bytes appeared where a
+  valid field was expected.
+- **13 discarded bytes** — stray/noise bytes that never matched a
+  valid frame at all and were skipped over one at a time.
+- **1 partial packet** — a packet that started correctly but the
+  stream ended before it could be completed (e.g. cut off mid-payload
+  or mid-CRC), which the parser reported rather than silently
+  dropping or crashing on.
+
+
