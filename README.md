@@ -13,14 +13,17 @@ provided sample data).
 
 | Task | Description | Video |
 |------|--------------|-------|
-| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [demos/task1_uart_parser.webm](demos/task1_uart_parser.webm) |
-| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [demos/task2_sensor_aggregator.webm](demos/task2_sensor_aggregator.webm) |
-| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [demos/task3_can_decoder.webm](demos/task3_can_decoder.webm) |
+| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [Watch on Google Drive](https://drive.google.com/file/d/1MX7ZFn-WXs9wkCZtJLWy1ZByh8Mt9Ayd/view?usp=sharing) |
+| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [Watch on Google Drive](https://drive.google.com/file/d/10urt2L4_-be85wKvlOMWdSBv9qost45I/view?usp=sharing) |
+| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [Watch on Google Drive](https://drive.google.com/file/d/1fUYBXdtku4Z899UY06t1W9Jic5UEP4kr/view?usp=sharing) |
 
-Recordings live in [`demos/`](demos/) — see that folder's
-[`README.md`](demos/README.md) for the expected filenames, a note on
-GitHub's file-size limits, and how to get inline playback vs. a plain
-download link.
+Hosted on Google Drive rather than committed to the repo — GitHub only
+offers real inline playback for videos uploaded through its own web
+editor (drag-and-drop), not for plain git-committed files, which just
+download instead of playing. A hosted link is simpler and works
+reliably everywhere. **Make sure each Drive link's sharing setting is
+"Anyone with the link can view"** before sending this repo along, or the
+reviewer won't be able to open them.
 
 ## Repository layout
 

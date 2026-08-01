@@ -103,6 +103,4 @@ Run `./sensor_aggregator_demo --help` for all options.
 
 ## Demo video
 
-[`demos/task2_sensor_aggregator.webm`](../demos/task2_sensor_aggregator.webm)
-(repo root) — see [`demos/README.md`](../demos/README.md) if it's not
-there yet.
+[Watch on Google Drive](https://drive.google.com/file/d/10urt2L4_-be85wKvlOMWdSBv9qost45I/view?usp=sharing)

@@ -122,6 +122,4 @@ partial_packets  : 1
 
 ## Demo video
 
-[`demos/task1_uart_parser.webm`](../demos/task1_uart_parser.webm) (repo
-root) — see [`demos/README.md`](../demos/README.md) if it's not there
-yet.
+[Watch on Google Drive](https://drive.google.com/file/d/1MX7ZFn-WXs9wkCZtJLWy1ZByh8Mt9Ayd/view?usp=sharing)
