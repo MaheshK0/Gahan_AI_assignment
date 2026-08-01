@@ -49,7 +49,7 @@ architecture writeup and the empirical findings (CRC framing, bit-layout
 conventions, checksum algorithm, injected faults) for all three tasks
 together.
 
-## Prerequisites (Ubuntu 22.04 or 24.04)
+## Prerequisites (Ubuntu 22.04 )
 
 ```bash
 sudo apt-get update
