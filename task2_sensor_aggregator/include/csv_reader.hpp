@@ -8,7 +8,7 @@ namespace agg {
 // comma-separated, single-line-per-record reference files used in this
 // task. Not a general-purpose CSV library (no quoted-field/escaping
 // support) by design, per the assignment's "avoid third-party libraries,
-// demonstrate the logic yourself" guidance.
+
 class CsvReader {
 public:
     // Reads the whole file and returns rows (including the header row at
