@@ -1,0 +1,142 @@
+{
+  "0x180": {
+    "name": "EngineData",
+    "period_ms": 20,
+    "byte_order": "intel",
+    "signals": {
+      "rpm": {
+        "start_bit": 0,
+        "length": 16,
+        "scale": 0.25,
+        "offset": 0,
+        "signed": false,
+        "unit": "rpm"
+      },
+      "counter": {
+        "start_bit": 16,
+        "length": 4,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      },
+      "checksum": {
+        "start_bit": 24,
+        "length": 8,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      }
+    }
+  },
+  "0x220": {
+    "name": "VehicleSpeed",
+    "period_ms": 20,
+    "byte_order": "intel",
+    "signals": {
+      "speed": {
+        "start_bit": 0,
+        "length": 16,
+        "scale": 0.01,
+        "offset": 0,
+        "signed": false,
+        "unit": "km/h"
+      },
+      "gear": {
+        "start_bit": 16,
+        "length": 4,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": "",
+        "enum": {
+          "0": "P",
+          "1": "R",
+          "2": "N",
+          "3": "D1",
+          "4": "D2",
+          "5": "D3"
+        }
+      },
+      "counter": {
+        "start_bit": 20,
+        "length": 4,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      },
+      "checksum": {
+        "start_bit": 24,
+        "length": 8,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      }
+    }
+  },
+  "0x2B0": {
+    "name": "SteeringData",
+    "period_ms": 10,
+    "byte_order": "motorola",
+    "signals": {
+      "steering_angle": {
+        "start_bit": 0,
+        "length": 16,
+        "scale": 0.1,
+        "offset": 0,
+        "signed": true,
+        "unit": "deg"
+      },
+      "counter": {
+        "start_bit": 16,
+        "length": 4,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      },
+      "checksum": {
+        "start_bit": 24,
+        "length": 8,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      }
+    }
+  },
+  "0x1A0": {
+    "name": "BrakeStatus",
+    "period_ms": 20,
+    "byte_order": "intel",
+    "signals": {
+      "brake_pressed": {
+        "start_bit": 0,
+        "length": 1,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": "bool"
+      },
+      "counter": {
+        "start_bit": 4,
+        "length": 4,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      },
+      "checksum": {
+        "start_bit": 8,
+        "length": 8,
+        "scale": 1,
+        "offset": 0,
+        "signed": false,
+        "unit": ""
+      }
+    }
+  }
+}
