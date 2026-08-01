@@ -104,3 +104,37 @@ Run `./sensor_aggregator_demo --help` for all options.
 ## Demo video
 
 [Watch on Google Drive](https://drive.google.com/file/d/10urt2L4_-be85wKvlOMWdSBv9qost45I/view?usp=sharing)
+
+## Result 
+
+**Build:** CMake configures cleanly with pthreads detected, producing
+`sensor_aggregator_lib` and the `sensor_aggregator_demo` executable
+with no warnings.
+
+**Real-time run (`--data-dir ../data`, speed 1.0x):**
+- Loaded 36 GPS, 793 IMU, 393 Encoder samples, and replayed them for
+  ~8s, matching the source data's own timeline.
+- Each 200ms printout shows GPS, IMU, and Encoder all updating
+  independently at their own rates (GPS every 200ms, IMU near-continuously,
+  Encoder every 20ms) — confirming they're genuinely separate producer
+  timelines, not one merged/interpolated stream.
+- Around t=3.0s–3.8s, GPS briefly went `STALE` while its `src` timestamp
+  held at 2800ms — a real gap in the GPS input data — while IMU and
+  Encoder kept updating normally, showing staleness is tracked
+  **per-sensor**, not globally.
+- Ended with all three sensors fresh at t≈8.0s and a clean shutdown
+  message, confirming all producer threads joined properly.
+
+**Stall-injection run (`--speed 20 --stall imu --stall-after 2000 --stall-duration 3000`):**
+- At 20x speed, GPS and Encoder race ahead to their final values almost
+  immediately, while IMU is deliberately frozen at `src=1990ms` —
+  exactly where the injected stall starts.
+- IMU correctly flips to `STALE` and stays there for the full stall
+  window, while GPS/Encoder also eventually go `STALE` once the run
+  outpaces their last update (since the whole stream finishes before
+  the print loop naturally catches up).
+- IMU recovers (`ok src=4070ms`, then `src=8000ms`) right after the
+  stall duration elapses, proving staleness detection **both fires and
+  clears correctly**, and that a stalled sensor doesn't block or slow
+  down the other two.
+
