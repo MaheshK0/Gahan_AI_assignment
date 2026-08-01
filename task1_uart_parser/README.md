@@ -23,7 +23,7 @@ SOF1(0xAA) | SOF2(0x55) | Length | Type | Payload[Length] | CRC16 (2 bytes)
 
 ### A finding worth knowing about
 
-The written assignment spec says the CRC should cover
+The assignment spec says the CRC should cover
 `Length + Type + Payload`. I checked that claim against the actual
 sample data byte-by-byte before writing any parsing code — and it
 doesn't hold up. The real wire format only covers `Type + Payload`

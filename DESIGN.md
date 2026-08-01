@@ -53,12 +53,7 @@ isn't mistaken for a bug.
 - `partial_packets` — incremented by `finish()` if the stream ends
   mid-packet.
 
-One subtlety worth calling out for the interview discussion: because this
-is a genuine single-pass streaming parser, once a byte has been consumed
-as part of a (possibly-failing) packet attempt, it cannot be
-retroactively reinterpreted as the start of a different packet — a real
-UART receiver has no way to "rewind" bytes it has already shifted in
-either. Concretely, `uart_stream.bin` contains a corrupted packet at
+One important characteristic of this implementation is that it operates as a true single-pass streaming parser. As each incoming byte is processed, it becomes part of the current parsing sequence and is not reconsidered as the beginning of a new packet, even if the current packet later turns out to be invalid. This behavior reflects the operation of real UART communication systems, where received bytes are processed sequentially without the ability to rewind or reprocess previously received data. Concretely, `uart_stream.bin` contains a corrupted packet at
 offset `0x20` whose bogus payload happens to contain the byte sequence
 `AA 55` (a fake SOF). A buffering/backtracking parser could try
 re-interpreting starting from that inner `AA 55`; this parser does not —
