@@ -130,7 +130,7 @@ mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 ```
-##RUN
+## RUN
 
 Then, from inside `build/`:
 
