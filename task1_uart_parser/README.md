@@ -122,6 +122,6 @@ partial_packets  : 1
 
 ## Demo video
 
-[`demos/task1_uart_parser.mp4`](../demos/task1_uart_parser.mp4) (repo
+[`demos/task1_uart_parser.webm`](../demos/task1_uart_parser.webm) (repo
 root) — see [`demos/README.md`](../demos/README.md) if it's not there
 yet.

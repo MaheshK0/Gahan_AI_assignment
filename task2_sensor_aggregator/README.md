@@ -103,6 +103,6 @@ Run `./sensor_aggregator_demo --help` for all options.
 
 ## Demo video
 
-[`demos/task2_sensor_aggregator.mp4`](../demos/task2_sensor_aggregator.mp4)
+[`demos/task2_sensor_aggregator.webm`](../demos/task2_sensor_aggregator.webm)
 (repo root) — see [`demos/README.md`](../demos/README.md) if it's not
 there yet.

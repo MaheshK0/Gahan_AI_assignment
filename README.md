@@ -13,9 +13,9 @@ provided sample data).
 
 | Task | Description | Video |
 |------|--------------|-------|
-| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [demos/task1_uart_parser.mp4](demos/task1_uart_parser.mp4) |
-| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [demos/task2_sensor_aggregator.mp4](demos/task2_sensor_aggregator.mp4) |
-| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [demos/task3_can_decoder.mp4](demos/task3_can_decoder.mp4) |
+| Task 1 — UART Parser | Decodes `uart_stream.bin`, prints packets + parser stats | [demos/task1_uart_parser.webm](demos/task1_uart_parser.webm) |
+| Task 2 — Sensor Aggregator | Live GPS/IMU/Encoder replay with staleness detection | [demos/task2_sensor_aggregator.webm](demos/task2_sensor_aggregator.webm) |
+| Task 3 — CAN Decoder | Replays `frames.log`, flags all 3 injected faults live | [demos/task3_can_decoder.webm](demos/task3_can_decoder.webm) |
 
 Recordings live in [`demos/`](demos/) — see that folder's
 [`README.md`](demos/README.md) for the expected filenames, a note on

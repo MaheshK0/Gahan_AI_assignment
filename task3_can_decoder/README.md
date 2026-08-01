@@ -111,6 +111,6 @@ Expected anomaly output (`--summary-only`):
 
 ## Demo video
 
-[`demos/task3_can_decoder.mp4`](../demos/task3_can_decoder.mp4) (repo
+[`demos/task3_can_decoder.webm`](../demos/task3_can_decoder.webm) (repo
 root) — see [`demos/README.md`](../demos/README.md) if it's not there
 yet.
